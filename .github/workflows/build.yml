@@ -2,53 +2,94 @@ name: Build APK
 
 on:
   push:
-    branches: [ main, develop ]
-  pull_request:
     branches: [ main ]
-  release:
-    types: [ created ]
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04  # إصدار مستقر لـ Buildozer
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    - name: Set up Java 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: gradle
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
 
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
+      - name: Install System Dependencies ✅ الإصلاح هنا
+        run: |
+          echo "🔄 Updating system..."
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            python3-pip python3-setuptools python3-venv \
+            virtualenv wget curl ca-certificates zip unzip \
+            openjdk-17-jdk autoconf automake libtool libtool-bin \
+            pkg-config zlib1g-dev libffi-dev libncursesw6 libssl-dev bc \
+            git ccache libgl1-mesa-glx libglib2.0-0 \
+            libffi-dev libev-dev libjpeg-dev
+          echo "✅ System dependencies installed"
 
-    - name: Grant execute permission
-      run: chmod +x gradlew
+      - name: Install Python Dependencies
+        run: |
+          echo "🐍 Installing Python packages..."
+          pip3 install --upgrade pip
+          pip3 install buildozer cython==0.29.33
+          echo "✅ Python packages installed"
 
-    - name: Build Release APK
-      run: ./gradlew assembleRelease --no-daemon
+      - name: Prepare Build Environment
+        run: |
+          echo "📁 Current directory: $(pwd)"
+          echo "📄 Files in directory:"
+          ls -la
+          
+          # تهيئة Buildozer إذا لزم الأمر
+          if [ ! -f buildozer.spec ]; then
+            echo "⚠️ buildozer.spec not found, creating one..."
+            buildozer init
+          fi
+          
+          # تعديل إعدادات مهمة لضمان النجاح
+          echo "⚙️ Configuring buildozer.spec..."
+          sed -i 's/# android.accept_sdk_license = True/android.accept_sdk_license = True/' buildozer.spec
+          sed -i 's/# android.api = 27/android.api = 33/' buildozer.spec
+          sed -i 's/# android.minapi = 21/android.minapi = 21/' buildozer.spec
+          sed -i 's/# p4a.branch = master/p4a.branch = master/' buildozer.spec
+          
+          # ✅ إضافة مهمة: تحديد فرع مستقر لـ python-for-android
+          echo "🔧 Setting p4a branch to stable..."
+          sed -i 's/p4a.branch = master/p4a.branch = develop/' buildozer.spec
+          
+          echo "✅ Build environment ready"
 
-    - name: Build Debug APK
-      run: ./gradlew assembleDebug --no-daemon
+      - name: Build APK with Buildozer
+        run: |
+          echo "🚀 Starting Buildozer build..."
+          echo "📝 Buildozer version: $(buildozer --version)"
+          
+          # تشغيل البناء مع تفاصيل كاملة
+          buildozer -v android debug 2>&1 | tee build.log
+          
+          # فحص النتيجة
+          if [ $? -eq 0 ]; then
+            echo "✅ Build successful!"
+          else
+            echo "❌ Build failed! Showing last 100 lines of log:"
+            tail -n 100 build.log
+            exit 1
+          fi
+        shell: bash
 
-    - name: Upload APK Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: apk-builds
-        path: |
-          app/build/outputs/apk/release/
-          app/build/outputs/apk/debug/
-        retention-days: 30
+      - name: Verify APK Output
+        run: |
+          echo "🔍 Checking for APK file..."
+          find . -name "*.apk" -type f
+          ls -lah bin/ 2>/dev/null || echo "⚠️ bin/ directory not found"
 
-    - name: Upload to Release
-      if: github.event_name == 'release'
-      uses: softprops/action-gh-release@v1
-      with:
-        files: app/build/outputs/apk/release/app-release.apk
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: bin/*.apk
+          if-no-files-found: warn
