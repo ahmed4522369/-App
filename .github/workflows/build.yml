@@ -3,11 +3,11 @@ name: Build APK
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: # يسمح بالتشغيل اليدوي
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # يستخدم Ubuntu 24.04 حالياً
 
     steps:
       - name: Checkout Code
@@ -16,18 +16,32 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: 3.8
+          python-version: '3.8'
 
-      - name: Install Dependencies
+      - name: Install Dependencies ✅ تم إصلاح الحزم
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip python3-venv virtualenv libncurses5
-          pip3 install buildozer cython
+          sudo apt-get install -y python3-pip python3-setuptools python3-venv \
+            virtualenv wget curl ca-certificates zip unzip \
+            openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libffi-dev \
+            libncursesw6 libssl-dev bc  # ✅ تم استبدال libncurses5 بـ libncursesw6
+          
+          pip3 install --upgrade pip
+          pip3 install buildozer cython==0.29.33
 
       - name: Build APK with Buildozer
         run: |
-          # إصلاح مشاكل التوافق في البيئة السحابية
-          buildozer android debug deploy run
+          # إنشاء ملف الإعدادات إذا لم يكن موجوداً
+          if [ ! -f buildozer.spec ]; then
+            buildozer init
+          fi
+          
+          # تعديل إعدادات مهمة لضمان النجاح
+          sed -i 's/# android.accept_sdk_license = True/android.accept_sdk_license = True/' buildozer.spec
+          sed -i 's/# android.api = 27/android.api = 33/' buildozer.spec
+          
+          # تشغيل البناء
+          buildozer -v android debug
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
 
@@ -36,3 +50,4 @@ jobs:
         with:
           name: app-debug
           path: bin/*.apk
+          if-no-files-found: warn
